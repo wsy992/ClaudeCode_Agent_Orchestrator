@@ -21,6 +21,35 @@
 
 ---
 
+## 📁 项目结构
+
+```
+├── README.md                                               # 本文件
+├── ClaudeCode_Agent_Orchestrator_研究报告_正式版.md        # 完整研究报告（4 万字）
+├── ClaudeCode.pptx                                         # 汇报 PPT
+│
+├── claudecode-main/                                        # ClaudeCode 原始源码
+│   └── rust/crates/runtime/src/
+│       ├── bootstrap.rs          (引导阶段管理)
+│       ├── permissions.rs        (权限控制系统)
+│       ├── hooks.rs              (Hook 拦截系统)
+│       ├── session.rs            (会话管理)
+│       └── conversation.rs       (对话引擎)
+│
+└── source_code/                                            # 研究用源码 & 测试
+    ├── conversation_core.rs                                # ConversationRuntime 核心
+    ├── agent_tools.rs                                      # 子 Agent 工具执行器
+    ├── permissions.rs                                      # 权限系统复现
+    ├── hook_system.rs                                      # Hook 系统复现
+    ├── bootstrap.rs                                        # Bootstrap 系统复现
+    ├── session.rs                                          # 会话管理复现
+    ├── experiments.rs                                      # 扩展实验
+    ├── test_suite.rs                                       # 63 个测试用例
+    └── README.md                                           # 源码索引
+```
+
+---
+
 ## 🏗️ 核心架构
 
 ### 分层设计
@@ -222,6 +251,15 @@ fn test_permission_mode_ordering() {
 }
 ```
 
+### 运行测试
+
+```bash
+cd source_code
+rustc --test test_suite.rs -o test_suite
+./test_suite
+# 输出: running 63 tests, test result: ok. 63 passed; 0 failed
+```
+
 ---
 
 ## 🔄 框架对比
@@ -262,46 +300,6 @@ fn test_permission_mode_ordering() {
 | 权限仅检查工具级别 | 增加参数级别的细粒度校验 |
 | Token 追踪无上限断点 | 阶梯式 Token 预算告警 |
 | 子 Agent 单向通信 | 引入 Agent 结果总线 |
-
----
-
-## 📁 项目结构
-
-```
-├── README.md                                               # 本文件
-├── ClaudeCode_Agent_Orchestrator_研究报告_正式版.md        # 完整研究报告（4 万字）
-├── ClaudeCode.pptx                                         # 汇报 PPT
-│
-├── claudecode-main/                                        # ClaudeCode 原始源码
-│   └── rust/crates/runtime/src/
-│       ├── bootstrap.rs          (引导阶段管理)
-│       ├── permissions.rs        (权限控制系统)
-│       ├── hooks.rs              (Hook 拦截系统)
-│       ├── session.rs            (会话管理)
-│       └── conversation.rs       (对话引擎)
-│
-└── source_code/                                            # 研究用源码 & 测试
-    ├── conversation_core.rs                                # ConversationRuntime 核心
-    ├── agent_tools.rs                                      # 子 Agent 工具执行器
-    ├── permissions.rs                                      # 权限系统复现
-    ├── hook_system.rs                                      # Hook 系统复现
-    ├── bootstrap.rs                                        # Bootstrap 系统复现
-    ├── session.rs                                          # 会话管理复现
-    ├── experiments.rs                                      # 扩展实验
-    ├── test_suite.rs                                       # 63 个测试用例
-    └── README.md                                           # 源码索引
-```
-
----
-
-## ▶️ 运行测试
-
-```bash
-cd source_code
-rustc --test test_suite.rs -o test_suite
-./test_suite
-# 输出: running 63 tests, test result: ok. 63 passed; 0 failed
-```
 
 ---
 
