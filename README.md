@@ -171,6 +171,31 @@ Agent Orchestrator 采用**主从 Agent** 协作模式，与 AutoGen 的对等�
                  └─────────▶ Session (状态更新，进入下一轮)
 ```
 
+这张图回答了"多 Agent 协作怎么发生"：主 Agent 通过 `spawn_agent_job()` 派出子 Agent，每个子 Agent 在独立线程中运行，持有自己的工具白名单，完成后通过结构化的 AgentOutput 返回结果给主 Agent。子 Agent 之间互不通信——所有协调都经过主 Agent。
+
+### 4.1.4 任务调度数据流
+
+下图刻画了一次典型对话中，任务如何在各组件之间流转：
+
+```
+用户输入 ──▶ Session ──▶ ConversationRuntime ──▶ API Client
+                ▲              │                      │
+                │              │◀────── LLM 响应 ──────┘
+                │              │
+                │       ┌──────┴──────┐
+                │       │  调度器分发    │
+                │       ▼              ▼
+                │  Permission       Hook
+                │   权限检查         拦截
+                │       │              │
+                │       └──────┬───────┘
+                │              ▼
+                │       Tool Executor ──▶ 执行结果
+                │              │
+                └──────────────┘
+              状态更新，进入下一轮
+```
+
 数据流的核心特征是**循环驱动**：用户的一次输入可能触发主 Agent 多次"思考→执行"循环，每次循环都经过权限检查和 Hook 拦截，直到 LLM 决定无需更多工具调用为止。
 
 ### 核心模块职责
@@ -357,34 +382,9 @@ fn execute_subagent(subagent_type: &str, task: &str) -> AgentOutput {
 
 ---
 
-### 四、Bootstrap 引导系统 — BootstrapPlan
+### 四、Bootstrap 引导系统
 
-ClaudeCode 的启动流程分为 **12 个阶段**（BootstrapPhase），采用 FastPath 竞争机制——多个路径同时尝试启动，谁先完成谁胜出：
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum BootstrapPhase {
-    CliEntry,                       // CLI 入口初始化
-    FastPathVersion,                // 版本快速检测
-    StartupProfiler,                // 启动性能分析器
-    SystemPromptFastPath,          // 系统提示词组装
-    ChromeMcpFastPath,             // Chrome MCP 连接
-    DaemonWorkerFastPath,          // 守护进程工作线程
-    BridgeFastPath,                // 桥接模式
-    DaemonFastPath,                // 守护进程模式
-    BackgroundSessionFastPath,     // 后台会话
-    TemplateFastPath,              // 模板初始化
-    EnvironmentRunnerFastPath,     // 环境运行器
-    MainRuntime,                   // 主运行时（最终阶段）
-}
-```
-
-启动计划支持两种构建方式：
-
-- **`BootstrapPlan::claw_default()`**：生成包含全部 12 阶段的完整启动计划（"claw"在英语中是抓取的意思，这里表示选择全部路径）
-- **`BootstrapPlan::from_phases(phases)`**：从自定义阶段列表构建启动计划
-
-两种方式均内置 **阶段去重（deduplication）** 机制，确保同阶段逻辑只执行一次，避免重复初始化。
+⚡ **启动优化**：12 阶段 FastPath 竞争引导，自动去重避免重复初始化。支持完整的 `claw_default()` 与自定义 `from_phases()` 两种构建方式。
 
 ---
 
@@ -449,38 +449,11 @@ pub struct ConversationRuntime<C, T> {
 Agent 在其生命周期中经历四个状态，由 ConversationRuntime 统一管理：
 
 ```
-             ┌──────────────────────────────────┐
-             │          Initial                  │
-             │     Launcher 创建 Agent           │
-             └────────────┬─────────────────────┘
-                          │
-                          ▼
-             ┌──────────────────────────────────┐
-             │          Waiting                  │
-   ┌────────▶│    等待用户输入 / LLM 响应         │
-   │         └────────────┬─────────────────────┘
-   │                      │
-   │       ┌──────────────┘
-   │       ▼
-   │  ┌────────────────────────────────────────┐
-   │  │            Executing                   │
-   │  │                                        │
-   │  │  ┌──────────────┐  ┌───────────────┐  │
-   │  │  │  LLM 请求处理 │  │  工具执行循环  │  │
-   │  │  │  tool_calls   │  │  Permission   │  │
-   │  │  │  解析        │  │  Hook 检查    │  │
-   │  │  └──────────────┘  └───────────────┘  │
-   │  └────────────────────────────────────────┘
-   │                      │
-   │        ┌─────────────┘
-   │        │      (还有工具调用)
-   └────────┘
-                          │
-                          ▼ (max_iterations 或 无工具调用)
-             ┌──────────────────────────────────┐
-             │         Terminated                │
-             │    Agent 执行完毕，资源释放        │
-             └──────────────────────────────────┘
+  Initial ───▶ Waiting ───▶ Executing ───▶ Terminated
+ 创建Agent    等待输入/响应   LLM请求+工具执行   资源释放
+                  ▲               │
+                  └───────────────┘
+                 还有工具调用则继续
 ```
 
 ### 完整执行伪代码
@@ -612,18 +585,6 @@ fn test_permission_mode_ordering() {
 }
 ```
 
-**Bootstrap 阶段去重**：
-```rust
-#[test]
-fn test_bootstrap_plan_deduplication() {
-    let plan = BootstrapPlan::from_phases(vec![
-        BootstrapPhase::MainRuntime,
-        BootstrapPhase::MainRuntime, // 重复阶段
-        BootstrapPhase::CliEntry,
-    ]);
-    assert_eq!(plan.phases().len(), 2); // 去重后仅保留 ManRuntime + CliEntry
-}
-```
 
 ### 运行测试
 
